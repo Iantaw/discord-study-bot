@@ -55,39 +55,6 @@ const commandFolders = fs.readdirSync(foldersPath);
     client.login(process.env.DISCORD_TOKEN);
 })();
 
-const btn = new ButtonBuilder()
-        .setCustomId('btn')
-        .setLabel('Click for Test')
-        .setStyle(ButtonStyle.Primary);
-const row = new ActionRowBuilder().addComponents(btn);
-
-client.on("messageCreate", async (message) => {
-    console.log(message);
-
-    if (!message?.author.bot) {
-        try {
-            await message.author.send({
-                content: 'Button test',
-                components: [row]
-            });
-        } catch {}
-        await message.channel.send({
-            content: 'Button test',
-            components: [row]
-        });
-    }
-});
-
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isButton()) return;
-    if (interaction.customId === 'btn') {
-        await interaction.reply({
-            content: 'Test',
-            ephemeral: true
-        });
-    }
-});
-
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return; 
 	const command = interaction.client.commands.get(interaction.commandName);

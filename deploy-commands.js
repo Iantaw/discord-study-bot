@@ -5,6 +5,7 @@ import { REST, Routes, Collection } from 'discord.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +33,9 @@ for (const folder of commandFolders) {
 
 const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 const clientID = process.env.DISCORD_CLIENT_ID;
+
+const ffmpeg = new FFmpeg();
+await ffmpeg.load()
 
 (async () => {
     try {
