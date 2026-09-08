@@ -7,8 +7,19 @@ import {
     MessageFlags,
     AttachmentBuilder,
 } from "discord.js";
+import { DatabaseSync } from 'node:sqlite';
 
-async function pomodoroTimer(minutes, channel) {
+const db = new DatabaseSync('stats.db');
+const update_streak = db.prepare(`
+    INSERT INTO streaks (user_id, current_streak, longest_streak, last_active_date)
+    VALUES (?, 1, 1, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+        current_streak = current_streak + 1,
+        longest_streak = MAX(longest_streak, current_streak + 1),
+        last_active_date = excluded.last_active_date
+`)
+
+async function pomodoroTimer(minutes, channel, userId) {
     const targetTime = Date.now() + minutes * 60 * 1000;
     let timer;
     let msg;
@@ -22,6 +33,7 @@ async function pomodoroTimer(minutes, channel) {
 
         if (distance < 0) {
             countdown = "Timer Complete";
+            update_streak.run(userId, Date.now());
             clearInterval(timer);
         } else {
             const h = Math.floor((distance % 86400000) / 3600000);
@@ -77,6 +89,7 @@ async function pomodoroTimer(minutes, channel) {
 export default {
     data: new SlashCommandBuilder().setName('pomodoro').setDescription('Start a pomodoro timer!').addIntegerOption((option) => option.setName('minutes').setDescription('Length of timer in minutes').setRequired(true)),
     async execute(interaction) {
+        const userId = interaction.user.id;
         const minutes = interaction.options.getInteger('minutes');
         if (minutes <= 0) {
             return interaction.reply({
@@ -85,7 +98,7 @@ export default {
             });
         }
 
-        await pomodoroTimer(minutes, interaction.channel);
+        await pomodoroTimer(minutes, interaction.channel, userId);
         await interaction.reply('Timer started!');
     }
 }
