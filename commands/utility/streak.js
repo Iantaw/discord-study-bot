@@ -1,37 +1,52 @@
+import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { DatabaseSync } from 'node:sqlite';
-import { EmbedBuilder, SlashCommandBuilder, MessageFlags } from "discord.js";
 
-async function streak_stats(userId, channel) {
-    const db = new DatabaseSync('stats.db');
-    const row = db.prepare('SELECT * FROM streaks WHERE user_id = ?').get(userId);
-    if (!row) {
-        await channel.send({
-            embeds: [new EmbedBuilder()
-                .setColor('#FF6B00')
-                .setTitle('Streak Stats')
-                .setDescription('You have no streak yet. Complete a pomodoro to start one!')],
-            flags: MessageFlags.Ephemeral
-        });
-        db.close()
-        return;
-    }
-    const embed = new EmbedBuilder()
-        .setTitle('Streak Stats')
-        .setColor('#FF6B00')
-        .setFields(
-            { name: '🔥 Streak', value: String(row.current_streak), inline: false },
-            { name: '🏆 Best', value: String(row.longest_streak), inline: false },
-            { name: '📆 Last Time Active', value: String(row.last_active_date), inline: false }
-        )
-    await channel.send({ embeds: [embed]});
-    db.close()
-}
+const db = new DatabaseSync('stats.db');
 
 export default {
-    data: new SlashCommandBuilder().setName('streak').setDescription('See all your streak stats!'),
+    data: new SlashCommandBuilder()
+        .setName('streak')
+        .setDescription('View your Pomodoro streak'),
+
     async execute(interaction) {
-        const userId = interaction.user.id;
-        const channel = interaction.channel;
-        streak_stats(userId, channel);
-    }
-}
+        const row = db.prepare(`
+            SELECT current_streak, longest_streak, last_active_date
+            FROM streaks
+            WHERE user_id = ?
+        `).get(interaction.user.id);
+
+        if (!row) {
+            return interaction.reply('You don\'t have a Pomodoro streak yet!');
+        }
+
+        const lastActive = new Date(row.last_active_date);
+
+        const formattedDate = lastActive.toLocaleDateString('en-CA', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle(`${interaction.user.username}'s Pomodoro Streak`)
+            .addFields(
+                {
+                    name: '🔥 Current Streak',
+                    value: `${row.current_streak} day${row.current_streak === 1 ? '' : 's'}`,
+                    inline: true,
+                },
+                {
+                    name: '🏆 Longest Streak',
+                    value: `${row.longest_streak} day${row.longest_streak === 1 ? '' : 's'}`,
+                    inline: true,
+                },
+                {
+                    name: '📅 Last Active',
+                    value: formattedDate,
+                    inline: false,
+                },
+            );
+
+        await interaction.reply({ embeds: [embed] });
+    },
+};
