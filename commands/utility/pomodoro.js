@@ -154,6 +154,9 @@ async function pomodoroTimer(minutes, channel, userId) {
             }
         }
     });
+
+    timer = setInterval(updateCountdown, 1000);
+    updateCountdown();
 }
 
 export default {
