@@ -6,34 +6,67 @@ import {
     ButtonStyle,
     MessageFlags,
     AttachmentBuilder,
+    ActionRow,
 } from "discord.js";
 import { DatabaseSync } from 'node:sqlite';
 
-const db = new DatabaseSync('stats.db');
-const update_streak = db.prepare(`
-    INSERT INTO streaks (user_id, current_streak, longest_streak, last_active_date)
-    VALUES (?, 1, 1, ?)
-    ON CONFLICT(user_id) DO UPDATE SET
-        current_streak = current_streak + 1,
-        longest_streak = MAX(longest_streak, current_streak + 1),
-        last_active_date = excluded.last_active_date
-`)
-
 async function pomodoroTimer(minutes, channel, userId) {
-    const targetTime = Date.now() + minutes * 60 * 1000;
+    let targetTime = Date.now() + minutes * 60 * 1000;
     let timer;
     let msg;
     let paused = false;
+    let pauseStart = 0;
+    const timerId = Math.random().toString(36).slice(2, 10);
+    const pauseId = `pomodoro:${timerId}:pause`;
+    const stopId = `pomodoro:${timerId}:stop`;
 
     function updateCountdown() {
         if (paused) return;
-        const distance = targetTime - Date.now();
+        const distance = Math.max(0, targetTime - Date.now());
         const pad = n => String(n).padStart(2, '0');
         let countdown;
 
-        if (distance < 0) {
+        if (distance <= 0) {
             countdown = "Timer Complete";
-            update_streak.run(userId, Date.now());
+            const db = new DatabaseSync('stats.db');
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayMs = today.getTime();
+
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayMs = yesterday.getTime()
+
+            const update_streak = db.prepare(`
+                INSERT INTO streaks (user_id, current_streak, longest_streak, last_active_date)
+                VALUES (?, 1, 1, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    current_streak = CASE
+                        WHEN last_active_date = ? THEN current_streak
+                        WHEN last_active_date = ? THEN current_streak + 1
+                        ELSE 1
+                    END,
+                    longest_streak = MAX(
+                        longest_streak,
+                        CASE
+                            WHEN last_active_date = ? THEN current_streak
+                            WHEN last_active_date = ? THEN current_streak + 1
+                            ELSE 1
+                        END
+                    ),
+                    last_active_date = ?
+            `);
+            update_streak.run(
+                userId,
+                todayMs,
+                todayMs,
+                yesterdayMs,
+                todayMs,
+                yesterdayMs,
+                todayMs
+            );
+            
+            db.close()
             clearInterval(timer);
         } else {
             const h = Math.floor((distance % 86400000) / 3600000);
@@ -54,51 +87,81 @@ async function pomodoroTimer(minutes, channel, userId) {
         .setTitle('Starting...')
         .setImage('attachment://tomato.gif');
 
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('pause').setLabel('Pause').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('stop').setLabel('Stop').setStyle(ButtonStyle.Danger),
-    );
+    function createRow(paused = false, disabled = false) {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(pauseId)
+                .setLabel(paused ? 'Resume' : 'Pause')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(disabled),
 
-    msg = await channel.send({ embeds: [embed], files: [file], components: [row] });
+            new ButtonBuilder()
+                .setCustomId(stopId)
+                .setLabel('Stop')
+                .setStyle(ButtonStyle.Danger)
+                .setDisabled(disabled),
+        );
+    }
 
-    timer = setInterval(updateCountdown, 1000);
-    updateCountdown();
+    msg = await channel.send({ embeds: [embed], files: [file], components: [createRow()] });
 
-    channel.client.once('interactionCreate', async i => {
-        if (!i.isButton()) return;
+    const collector = msg.createMessageComponentCollector({
+        componentType:2,
+        time: minutes * 60 * 1000 + 60000,
+    });
 
-        if (i.customId === 'stop') {
+    collector.on('collect', async i => {
+        if (i.user.id !== userId) {
+            return i.reply({
+                content: 'Only the person who started this timer can control it.',
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        if (i.customId === stopId) {
             clearInterval(timer);
-            await i.reply({ content: 'Timer stopped.', flags: MessageFlags.Ephemeral });
-        } else if (i.customId === 'pause') {
+            collector.stop('stopped');
+
+            await i.update({
+                embeds: [
+                    new EmbedBuilder()
+                    .setTitle('Timer Stopped')
+                    .setImage('attachment://tomato.gif')
+                ],
+                components: [],
+            });
+
+            return;
+
+        }
+        if (i.customId === pauseId) {
             if (!paused) {
                 paused = true;
                 pauseStart = Date.now();
+                
+                await i.update({
+                    components: [createRow(true, false)],
+                });
             } else {
-                paused = false;
                 targetTime += Date.now() - pauseStart;
+                paused = false;
+
+                await i.update({
+                    components: [createRow(false, false)],
+                });
+
+                updateCountdown()
             }
-            await i.reply({
-                content: paused ? '⏸ Paused' : '▶ Resumed',
-                flags: MessageFlags.Ephemeral,
-            });
         }
     });
 }
 
 export default {
-    data: new SlashCommandBuilder().setName('pomodoro').setDescription('Start a pomodoro timer!').addIntegerOption((option) => option.setName('minutes').setDescription('Length of timer in minutes').setRequired(true)),
+    data: new SlashCommandBuilder().setName('pomodoro').setDescription('Start a pomodoro timer!').addIntegerOption((option) => option.setName('minutes').setDescription('Length of timer in minutes').setRequired(true).setMinValue(1).setMaxValue(1440)),
     async execute(interaction) {
         const userId = interaction.user.id;
         const minutes = interaction.options.getInteger('minutes');
-        if (minutes <= 0) {
-            return interaction.reply({
-                content: 'Invalid time, must be at least 1 minute!',
-                flags: MessageFlags.Ephemeral,
-            });
-        }
-
-        await pomodoroTimer(minutes, interaction.channel, userId);
         await interaction.reply('Timer started!');
+        await pomodoroTimer(minutes, interaction.channel, userId);
     }
 }
