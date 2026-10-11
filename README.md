@@ -1,1 +1,2 @@
 A super simple discord study bot with streaks. My first time using discord.js so had to debug a bunch.
+Disclosure: This was a new framework to me, and I did use AI to help me debug (not copy pasting my codebase and asking what's wrong, but rather learning how specific commands function) but most of the code is original. Also I understand if this project may seem simple, but you need to understand how many variations I had to go through before I got here. Nevertheless hope you enjoy! :D
